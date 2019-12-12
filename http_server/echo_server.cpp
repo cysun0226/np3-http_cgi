@@ -6,10 +6,16 @@
 #include <utility>
 #include <sstream>
 
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+
 #include <string>
 #include <vector>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
+#include <boost/asio/signal_set.hpp>
 
 #define MAX_REQUEST_NUM 5
 
@@ -17,6 +23,7 @@ using namespace std;
 using namespace boost::asio;
 
 io_service global_io_service;
+unsigned short port;
 
 typedef struct {
   std::string req_method;
@@ -54,7 +61,6 @@ void parse_query(std::string query_str, Request* req){
   boost::split( tokens, query_str, boost::is_any_of( "&" ), boost::token_compress_on);
   int host_num = 0;
   for( vector<string>::iterator it = tokens.begin(); it != tokens.end(); ++it ){
-    cout << *it << endl;
     if(it->at(0) == 'h'){
       host_num++;
       std::string hid = it->substr(0, it->find("="));
@@ -108,8 +114,23 @@ void parse(std::string req_str){
 
     // SERVER PROTOCOL
     ss >> server_protocol;
+    cout << server_protocol << endl;
+
     // host
     ss >> str; ss >> http_host;
+    cout << http_host << endl;
+
+    // server addr
+    ip::tcp::endpoint ep(ip::tcp::v4(), port);
+    cout << ep.address().to_string() << endl;
+    cout << port << endl;
+
+    // remote addr
+
+
+
+
+
 }
 
 class EchoSession : public enable_shared_from_this<EchoSession> {
@@ -152,21 +173,75 @@ class EchoServer {
  private:
   ip::tcp::acceptor _acceptor;
   ip::tcp::socket _socket;
+  boost::asio::signal_set _signal;
+  boost::asio::io_context& _io_context;
+  
+  
 
  public:
-  EchoServer(short port)
-      : _acceptor(global_io_service, ip::tcp::endpoint(ip::tcp::v4(), port)),
-        _socket(global_io_service) {
+  EchoServer(unsigned short port, boost::asio::io_context& io_context)
+      : _acceptor(io_context, {ip::tcp::v4(), port}),
+        _socket(io_context),
+        _signal(io_context, SIGCHLD),
+        _io_context(io_context)
+  {
     do_accept();
   }
 
  private:
   void do_accept() {
-    _acceptor.async_accept(_socket, [this](boost::system::error_code ec) {
-      if (!ec) make_shared<EchoSession>(move(_socket))->start();
+    _acceptor.async_accept([this](boost::system::error_code ec, ip::tcp::socket client_socket) {
+      // cout << _socket.remote_endpoint().address().to_string() << endl;
+      // if (!ec) make_shared<EchoSession>(move(_socket))->start();
+      if (!ec){
+        // take client socket        
+        _socket = std::move(client_socket);
+
+        // prepare for fork
+        _io_context.notify_fork(boost::asio::io_context::fork_prepare);
+
+        if (fork() == 0){
+          // child process
+          _io_context.notify_fork(boost::asio::io_context::fork_child);
+
+          // child don't need listener
+          _acceptor.close();
+
+          // unregister SIGCHLD
+          _signal.cancel();
+
+          // execute the child process
+          cout << "client process" << endl;
+
+        }
+        else{
+          // parent or fork failed
+          _io_context.notify_fork(boost::asio::io_context::fork_parent);
+
+          // the socket is forward to the cgi, close the socket
+          _socket.close();
+          do_accept();
+        }
+
+
+      }
 
       do_accept();
     });
+  }
+
+  void signal_handler() {
+    _signal.async_wait(
+      [this](boost::system::error_code, int /*signo*/){
+        if (_acceptor.is_open()){
+          // collect died child process
+          int status = 0;
+          while (waitpid(-1, &status, WNOHANG) > 0) {}
+
+          signal_handler();
+        }
+      }
+    );
   }
 };
 
@@ -176,9 +251,12 @@ int main(int argc, char* const argv[]) {
     return 1;
   }
 
+  cout << "\n start server ..." << endl;
+
   try {
-    unsigned short port = atoi(argv[1]);
-    EchoServer server(port);
+    port = atoi(argv[1]);
+    boost::asio::io_context io_context;
+    EchoServer server(port, io_context);
     global_io_service.run();
   } catch (exception& e) {
     cerr << "Exception: " << e.what() << "\n";
