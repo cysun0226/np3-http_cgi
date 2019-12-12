@@ -17,6 +17,9 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/asio/signal_set.hpp>
 
+#include <boost/process.hpp>
+
+
 #define MAX_REQUEST_NUM 5
 
 using namespace std;
@@ -185,11 +188,13 @@ class EchoServer {
         _signal(io_context, SIGCHLD),
         _io_context(io_context)
   {
+    signal_handler();
     do_accept();
   }
 
  private:
   void do_accept() {
+    cout << "wait for accept" << endl;
     _acceptor.async_accept([this](boost::system::error_code ec, ip::tcp::socket client_socket) {
       // cout << _socket.remote_endpoint().address().to_string() << endl;
       // if (!ec) make_shared<EchoSession>(move(_socket))->start();
@@ -210,8 +215,60 @@ class EchoServer {
           // unregister SIGCHLD
           _signal.cancel();
 
-          // execute the child process
+          cout << client_socket.native_handle() << endl;
+
+          // execute the child process (cgi)
+          // close(STDOUT_FILENO);
+          // close(STDIN_FILENO);
+          // close(STDERR_FILENO);
+          // std::string req_data;
+          // _socket.async_read_some(
+          //   buffer(req_data),
+          //   [this](boost::system::error_code ec, size_t length) {
+          //     if (!ec){
+          //       std::cout << "=== new request ===\n" << std::endl;
+          //     }
+          //   });
+
+            // cout << req_data << endl;
+            // write(_socket, buffer("HTTP/1.1 200 OK"));
+            boost::process::ipstream pipe_stream;
+            // boost::process::child c("ping 8.8.8.8 -c 10", boost::process::std_out > pipe_stream);
+            boost::process::child c("./hello.cgi", boost::process::std_out > pipe_stream);
+
+             std::string line;
+
+             async_write(_socket, pipe_stream),
+        [this](boost::system::error_code ec, std::size_t /*length*/)
+        {
+          if (!ec)
+        });
+
+              while (pipe_stream && std::getline(pipe_stream, line) && (c.running() || !line.empty())){
+                // std::cout << line << std::endl;
+                write(_socket, buffer(line));
+              }
+            c.wait();
+
+
           cout << "client process" << endl;
+          cout << "Content-type: text/html " << endl << endl;
+          cout << "<h1>Hello</h1>" << endl;
+
+          // std::string hello = "Content-type: text/html\n\n<h1>Hello</h1>";
+        //   boost::asio::async_write(_socket, boost::asio::buffer("HTTP/1.1 200 OK\n"),
+        // [this](boost::system::error_code ec, std::size_t /*length*/)
+        // {});
+        // boost::asio::async_write(_socket, boost::asio::buffer(hello),
+        // [this](boost::system::error_code ec, std::size_t /*length*/)
+        // {});
+
+          // write(_socket, buffer("HTTP/1.1 200 OK"));
+          // write(_socket, buffer(hello));
+
+          // while(true);
+
+          exit(0);
 
         }
         else{
@@ -225,8 +282,10 @@ class EchoServer {
 
 
       }
-
-      do_accept();
+      else{
+            std::cerr << "accept error: " << ec.message() << std::endl;
+            do_accept();
+      }
     });
   }
 
@@ -257,7 +316,7 @@ int main(int argc, char* const argv[]) {
     port = atoi(argv[1]);
     boost::asio::io_context io_context;
     EchoServer server(port, io_context);
-    global_io_service.run();
+    io_context.run();
   } catch (exception& e) {
     cerr << "Exception: " << e.what() << "\n";
   }
