@@ -7,6 +7,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <unistd.h>
 
 using namespace boost::asio;
 using namespace boost::asio::ip;
@@ -19,30 +20,48 @@ std::array<char, 4096> bytes;
 bool receive_prompt = false;
 std::vector<std::string> cmds;
 int cmd_idx = 0;
+std::string session_id;
 
 void read_handler(const boost::system::error_code &ec,
   std::size_t bytes_transferred)
 {
   if (!ec)
   {
-    std::cout.write(bytes.data(), bytes_transferred);
-    std::cout.flush();
     std::string recv_str(bytes.data());
     if (recv_str.find("% ") != std::string::npos){
+        // print prompt
+    }
+    
+    std::cout.write(bytes.data(), bytes_transferred);
+    std::cout.flush();
+    
+    bytes.fill(0);
+    
+    // send command
+    if (recv_str.find("% ") != std::string::npos){ // find prompt
+        // std::cout.write(bytes.data(), bytes_transferred);
+        // std::cout.flush();
         
-        sleep(1);
+        usleep(10000);
         receive_prompt = true;
+        
         std::string r = cmds[cmd_idx] + "\r\n";
         std::cout << cmds[cmd_idx] << std::endl;
         std::cout.flush();
-        sleep(1);
+
+        usleep(100000);
         write(tcp_socket, buffer(r));
-        tcp_socket.async_read_some(buffer(bytes), read_handler);
         cmd_idx++;
+        tcp_socket.async_read_some(buffer(bytes), read_handler);
     }
     else{
+        // std::cout.write(bytes.data(), bytes_transferred);
+        // std::cout.flush();
         tcp_socket.async_read_some(buffer(bytes), read_handler);
     }
+
+    // clear received content
+    // bytes.fill(0);
 
     // tcp_socket.async_read_some(buffer(bytes), read_handler);
   }
@@ -82,8 +101,8 @@ void resolve_handler(const boost::system::error_code &ec,
 
 int main(int argc, char* const argv[])
 {
-  if (argc < 2) {
-    std::cerr << "Usage:" << argv[0] << " [ip] [port] [cmd_file]" << std::endl;
+  if (argc < 4) {
+    std::cerr << "Usage:" << argv[0] << " [ip] [port] [cmd_file] [session_id]" << std::endl;
     return 1;
   }
 
@@ -98,7 +117,7 @@ int main(int argc, char* const argv[])
   else{
       std::cout << "can't open " << argv[3] << std::endl;
   }
-  
+  session_id = argv[4];
   tcp::resolver::query q{argv[1], argv[2]};
   resolv.async_resolve(q, resolve_handler);
   ioservice.run();
