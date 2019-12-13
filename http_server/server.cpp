@@ -18,6 +18,8 @@
 #include <boost/asio/signal_set.hpp>
 
 #include <boost/process.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/algorithm/string/replace.hpp>
 
 
 #define MAX_REQUEST_NUM 5
@@ -88,7 +90,8 @@ void parse_query(std::string query_str, Request* req){
   
 }
 
-void parse(std::string req_str, std::string server_ip){
+std::string parse(std::string req_str, std::string server_ip){
+    boost::replace_all(req_str, "\\", "");
     std::cout << req_str << std::endl;
     stringstream ss;
     Request requests[MAX_REQUEST_NUM];
@@ -110,7 +113,7 @@ void parse(std::string req_str, std::string server_ip){
     // uri & QUERY STRING
     ss >> str;
     if (str == "/favicon.ico"){
-    	return;
+      return str;
     }
     std::cout << str << std::endl;
     req_uri = str.substr(0, str.find("?"));
@@ -148,6 +151,8 @@ void parse(std::string req_str, std::string server_ip){
     // setenv(// set_env_str = "SERVER ADDR="+serve.c_str(), 1)r
     setenv("SERVER_PORT", std::to_string(port).c_str(), 1);
     setenv("SERVER_PROTOCOL", server_protocol.c_str(), 1);
+
+    return req_uri;
 }
 
 std::array<char, 4096> bytes;
@@ -287,11 +292,21 @@ class EchoServer {
           // stringstream tmp_ss;
           // tmp_ss << _socket.local_endpoint().address();
 
-          parse(req_string, "");
+          std::string uri_file = parse(req_string, "");
           std::cout << "remote addr" << std::endl;
           std::cout << _socket.remote_endpoint().address() << std::endl;
           std::cout << _socket.remote_endpoint().port() << std::endl;
 
+          
+
+          dup2(client_fd, STDOUT_FILENO);
+
+          // check if file exist
+          if (!boost::filesystem::exists("."+uri_file)){
+            cout << "HTTP/1.1 404 Not Found" << endl;
+            cout << "Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n" << endl;
+            exit(0);
+          }
 
           std::string set_env_str;
           set_env_str = "REMOTE_ADDR"+_socket.remote_endpoint().address().to_string();
@@ -300,11 +315,15 @@ class EchoServer {
           setenv("REMOTE_PORT", std::to_string(_socket.remote_endpoint().port()).c_str(), 1);
           // std::cout << "setenv st" << st << std::endl;
 
-          dup2(client_fd, STDOUT_FILENO);
+          
+
+          
           cout << "HTTP/1.1 200 OK" << endl;
+
+          std::string target_cgi = "."+uri_file;
           
           // execlp("console.cgi", "console.cgi", NULL);
-          execlp("printenv.cgi", "printenv.cgi", NULL);
+          execlp(target_cgi.c_str(), target_cgi.c_str(), NULL);
           cerr << "exec error" << endl;
 
             // write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
