@@ -139,12 +139,15 @@ void parse(std::string req_str, std::string server_ip){
     cout << "server_port" << endl;
     cout << port << endl;
 
-    // remote addr
-
-
-
-
-
+    // set env
+    std::string set_env_str;
+    setenv("REQUEST_METHOD", req_method.c_str(), 1);
+    setenv("REQUEST_URI", req_uri.c_str(), 1);
+    setenv("QUERY_STRING", query_str.c_str(), 1);
+    setenv("HTTP_HOST", http_host.c_str(), 1);
+    // setenv(// set_env_str = "SERVER ADDR="+serve.c_str(), 1)r
+    setenv("SERVER_PORT", std::to_string(port).c_str(), 1);
+    setenv("SERVER_PROTOCOL", server_protocol.c_str(), 1);
 }
 
 std::array<char, 4096> bytes;
@@ -290,10 +293,18 @@ class EchoServer {
           std::cout << _socket.remote_endpoint().port() << std::endl;
 
 
+          std::string set_env_str;
+          set_env_str = "REMOTE_ADDR"+_socket.remote_endpoint().address().to_string();
+          setenv("REMOTE_ADDR", _socket.remote_endpoint().address().to_string().c_str(), 1);
+          set_env_str = "REMOTE_PORT"+_socket.remote_endpoint().port();
+          setenv("REMOTE_PORT", std::to_string(_socket.remote_endpoint().port()).c_str(), 1);
+          // std::cout << "setenv st" << st << std::endl;
+
           dup2(client_fd, STDOUT_FILENO);
           cout << "HTTP/1.1 200 OK" << endl;
           
-          execlp("console.cgi", "console.cgi", NULL);
+          // execlp("console.cgi", "console.cgi", NULL);
+          execlp("printenv.cgi", "printenv.cgi", NULL);
           cerr << "exec error" << endl;
 
             // write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
@@ -347,18 +358,6 @@ int main(int argc, char* const argv[]) {
     cerr << "Usage:" << argv[0] << " [port]" << endl;
     return 1;
   }
-
-    io_service tmp_io_service;
-    ip::tcp::resolver tmp_res(tmp_io_service);
-// Do all your accepting and other stuff here.
-
-    char name[64], domain[64];
-    std::string name_s(name), domain_s(domain);
-
-    for (auto match : boost::make_iterator_range(tmp_res.resolve({name_s+"."+domain_s, "0"}), {})) {
-        std::cout << name << " -> " << match.endpoint().address() << "\n";
-    }
-    // std::cout << s << std::endl;
 
   char default_path[] = "PATH=/bin:bin:.:/usr/bin/env:/home/cysun/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin";
   putenv(default_path);
