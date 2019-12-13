@@ -27,6 +27,7 @@ using namespace boost::asio;
 
 io_service global_io_service;
 unsigned short port;
+std::string server_addr;
 
 typedef struct {
   std::string req_method;
@@ -87,7 +88,7 @@ void parse_query(std::string query_str, Request* req){
   
 }
 
-void parse(std::string req_str){
+void parse(std::string req_str, std::string server_ip){
     std::cout << req_str << std::endl;
     stringstream ss;
     Request requests[MAX_REQUEST_NUM];
@@ -103,6 +104,8 @@ void parse(std::string req_str){
 
     // REQUEST METHOD
     ss >> req_method;
+    cout << "req_method" << endl;
+    cout << req_method << endl;
 
     // uri & QUERY STRING
     ss >> str;
@@ -111,21 +114,29 @@ void parse(std::string req_str){
     }
     std::cout << str << std::endl;
     req_uri = str.substr(0, str.find("?"));
+    cout << "req_uri" << endl;
     cout << req_uri << endl;
     query_str = str.substr(str.find("?")+1);
-    parse_query(query_str, requests);
+    cout << "query_str" << endl;
+    cout << query_str << endl;
+    // parse_query(query_str, requests);
 
     // SERVER PROTOCOL
     ss >> server_protocol;
+    cout << "server_protocol" << endl;
     cout << server_protocol << endl;
 
     // host
     ss >> str; ss >> http_host;
+    http_host = http_host.substr(0, http_host.find(":"));
+    cout << "http_host" << endl;
     cout << http_host << endl;
 
     // server addr
     ip::tcp::endpoint ep(ip::tcp::v4(), port);
-    cout << ep.address().to_string() << endl;
+    cout << "server_addr" << endl;
+    cout << server_addr << endl;
+    cout << "server_port" << endl;
     cout << port << endl;
 
     // remote addr
@@ -135,6 +146,29 @@ void parse(std::string req_str){
 
 
 }
+
+std::array<char, 4096> bytes;
+
+void read_handler(const boost::system::error_code &ec,
+  std::size_t bytes_transferred){
+    std::cout << "read handle" << std::endl;
+    if(!ec){
+      std::string recv_str(bytes.data());
+      std::cout << recv_str << std::endl;
+
+       cout << "HTTP/1.1 200 OK" << endl;
+          // cout << "Content-type: text/html\r\n\r\n<h1>Hello</h1>" << endl;
+
+              std::string file = "hello.cgi";
+                std::string arg = "";
+                // std::string arg = " 8.8.8.8 -c 10";
+                // execlp("ping", "ping", "8.8.8.8", "-c", "5",NULL);
+                execlp("console.cgi", "console.cgi", NULL);
+                // execlp(file.c_str(),file.c_str(),arg.c_str(), NULL); //works
+        cerr << "exec error" << endl;
+
+    }
+  }
 
 class EchoSession : public enable_shared_from_this<EchoSession> {
  private:
@@ -157,7 +191,7 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
             do_write(length);
             std::string req_str(std::begin(_data), std::end(_data));
             std::cout << "=== new request ===\n" << std::endl;
-            parse(req_str);
+            // parse(req_str,);
           }
         });
   }
@@ -193,11 +227,14 @@ class EchoServer {
   }
 
  private:
+  
+
   void do_accept() {
     _acceptor.async_accept([this](boost::system::error_code ec, ip::tcp::socket client_socket) {
       // cout << _socket.remote_endpoint().address().to_string() << endl;
       // if (!ec) make_shared<EchoSession>(move(_socket))->start();
       if (!ec){
+
         // take client socket        
         _socket = std::move(client_socket);
 
@@ -215,71 +252,61 @@ class EchoServer {
           _signal.cancel();
 
           int client_fd = _socket.native_handle();
+          
+          // _socket.async_read_some(buffer(bytes), read_handler);
 
           // execute the child process (cgi)
-          close(STDOUT_FILENO);
-          close(STDIN_FILENO);
-          close(STDERR_FILENO);
+          // close(STDOUT_FILENO);
+          // close(STDIN_FILENO);
+          // close(STDERR_FILENO);
 
-          if (dup(client_fd) != STDIN_FILENO || dup(client_fd) != STDOUT_FILENO || dup(client_fd) != STDERR_FILENO){
-                std::cout << "can't dup client socket for stdin/out/err" << std::endl;
-                exit(1);
+          dup2(client_fd, STDIN_FILENO);
+
+          // if (dup(client_fd) != STDIN_FILENO || dup(client_fd) != STDOUT_FILENO || dup(client_fd) != STDERR_FILENO){
+          //       std::cout << "can't dup client socket for stdin/out/err" << std::endl;
+          //       exit(1);
+          // }
+
+
+
+          std::string req_token;
+          std::string req_string = "";
+
+          while(cin >> req_token){
+            // cout << req_str << endl;
+            req_string += req_token;
+            req_string += " ";
+            if(req_token == "Upgrade-Insecure-Requests:"){
+              break;
+            }
           }
 
-          // std::string req_data;
-          // _socket.async_read_some(
-          //   buffer(req_data),
-          //   [this](boost::system::error_code ec, size_t length) {
-          //     if (!ec){
-          //       std::cout << "=== new request ===\n" << std::endl;
-          //     }
-          //   });
+          // stringstream tmp_ss;
+          // tmp_ss << _socket.local_endpoint().address();
 
-            // cout << req_data << endl;
+          parse(req_string, "");
+          std::cout << "remote addr" << std::endl;
+          std::cout << _socket.remote_endpoint().address() << std::endl;
+          std::cout << _socket.remote_endpoint().port() << std::endl;
+
+
+          dup2(client_fd, STDOUT_FILENO);
+          cout << "HTTP/1.1 200 OK" << endl;
+          
+          execlp("console.cgi", "console.cgi", NULL);
+          cerr << "exec error" << endl;
+
+            // write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
+            // write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>Hello</h1>\r\n"));
             
-            // write(_socket, buffer("HTTP/1.1 200 OK\n"));
-            // write(_socket, buffer("Content-type: text/html\n\n<h1>Hello</h1>\n"));
-
-            cout << "HTTP/1.1 200 OK" << endl;
-            cout << "Content-type: text/html\n\n<h1>Hello</h1>" << endl;
-
-            
-            boost::process::ipstream pipe_stream;
+            // boost::process::ipstream pipe_stream;
             // boost::process::child c("ping 8.8.8.8 -c 10", boost::process::std_out > pipe_stream);
-            // boost::process::child c("./hello.cgi", boost::process::std_out > pipe_stream);
+            // // boost::process::child c("./hello.cgi", boost::process::std_out > pipe_stream);
 
-             std::string line;
+            //  std::string line;
 
-            //  async_write(_socket, pipe_stream),
-        // [this](boost::system::error_code ec, std::size_t /*length*/)
-        // {
-        //   if (!ec)
-        // });
-              // while (pipe_stream && std::getline(pipe_stream, line) && (c.running() || !line.empty())){
-              //   // std::cout << line << std::endl;
-              //   write(_socket, buffer(line+"\n"));
-              // }
-            // c.wait();
-
-
-          // cout << "client process" << endl;
-          // cout << "Content-type: text/html " << endl << endl;
-          // cout << "<h1>Hello</h1>" << endl;
-
-          // std::string hello = "Content-type: text/html\n\n<h1>Hello</h1>";
-        //   boost::asio::async_write(_socket, boost::asio::buffer("HTTP/1.1 200 OK\n"),
-        // [this](boost::system::error_code ec, std::size_t /*length*/)
-        // {});
-        // boost::asio::async_write(_socket, boost::asio::buffer(hello),
-        // [this](boost::system::error_code ec, std::size_t /*length*/)
-        // {});
-
-          // write(_socket, buffer("HTTP/1.1 200 OK"));
-          // write(_socket, buffer(hello));
-
-          // while(true);
-
-          // exit(0);
+          
+          exit(0);
 
         }
         else{
@@ -321,11 +348,26 @@ int main(int argc, char* const argv[]) {
     return 1;
   }
 
+    io_service tmp_io_service;
+    ip::tcp::resolver tmp_res(tmp_io_service);
+// Do all your accepting and other stuff here.
+
+    char name[64], domain[64];
+    std::string name_s(name), domain_s(domain);
+
+    for (auto match : boost::make_iterator_range(tmp_res.resolve({name_s+"."+domain_s, "0"}), {})) {
+        std::cout << name << " -> " << match.endpoint().address() << "\n";
+    }
+    // std::cout << s << std::endl;
+
+  char default_path[] = "PATH=/bin:bin:.:/usr/bin/env:/home/cysun/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin";
+  putenv(default_path);
   cout << "\n start server ..." << endl;
 
   try {
     port = atoi(argv[1]);
     boost::asio::io_context io_context;
+
     EchoServer server(port, io_context);
     io_context.run();
   } catch (exception& e) {
