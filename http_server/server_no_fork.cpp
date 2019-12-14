@@ -18,6 +18,7 @@
 #include <boost/process.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/replace.hpp>
+#include <thread>
 
 
 
@@ -29,6 +30,13 @@ using namespace boost::asio;
 io_service global_io_service;
 unsigned short port;
 std::string server_addr;
+
+void exec_cgi(int client_fd, std::string target_cgi){
+    dup2(client_fd, STDOUT_FILENO);
+    execlp(target_cgi.c_str(), target_cgi.c_str(), NULL);
+    cerr << "exec error" << endl;
+    // exit(0);
+}
 
 std::string parse(std::string req_str, std::string server_ip){
     boost::replace_all(req_str, "\\", "");
@@ -146,6 +154,10 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
             global_io_service.notify_fork(boost::asio::io_context::fork_prepare);
 
             // child process (cgi)
+            // int client_fd = _socket.native_handle();
+            // thread cgiThread(exec_cgi, client_fd, target_cgi);
+            // cgiThread.detach();
+
             if (fork() == 0){
                 global_io_service.notify_fork(boost::asio::io_context::fork_child);
                 int client_fd = _socket.native_handle();
