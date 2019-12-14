@@ -37,6 +37,7 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
         enum { max_length = 4096 };
         std::array<char, 4096> bytes;
         std::vector<std::string> cmds;
+        std::array<char, 4096> _cmd_buffer;
         int cmd_idx;
         std::string session_id;
         std::string host_ip;
@@ -48,7 +49,8 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
         ShellSession(std::string host_ip, std::string host_port, std::string cmd_file, std::string sid)
             : _query{host_ip, host_port},
               cmd_file(cmd_file),
-              session_id(sid)
+              session_id(sid),
+              cmd_idx(0)
         {
             if (read_cmd_from_file()){
                 do_resolve();
@@ -73,7 +75,14 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
         }
 
         void do_send_cmd(){
-
+              _socket.async_send(
+                buffer(cmds[cmd_idx]+"\r\n"),
+                [this](boost::system::error_code ec, size_t /* length */) {
+                    if (!ec){
+                        cmd_idx++;
+                        do_read();
+                    } 
+                });
         }
 
         void do_read() {
@@ -87,10 +96,25 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                     std::cout.flush();
                     bytes.fill(0);
                     
-                    
-                    
+                    // find prompt, send command
+                    if (recv_str.find("% ") != std::string::npos){ // find prompt
+                        usleep(100000);
+                        
+                        std::string r = cmds[cmd_idx] + "\r\n";
+                        std::cout << cmds[cmd_idx] << std::endl;
+                        std::cout.flush();
 
-                    do_read();
+                        usleep(100000);
+                        do_send_cmd();
+                    }
+                    else{
+                        // std::cout.write(bytes.data(), bytes_transferred);
+                        // std::cout.flush();
+                        do_read();
+                    }
+                }
+                else{
+                    std::cerr << "(connection close)" << std::endl;
                 }
             });
         }
