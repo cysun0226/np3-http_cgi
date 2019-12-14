@@ -252,11 +252,13 @@ const std::string webpage_template = R"(
 std::vector<std::string>  host_cols;
 std::vector<std::string>  table_tds;
 
-const std::string footer_1 = "</tr>\n</thead>\n<tbody>\n<tr>";
-const std::string footer_2 = "</tr>\n</tbody>\n</table>\n</body>\n</html>";
-
           
 std::string generate_webpage(){
+  
+
+  const std::string footer_1 = "</tr>\n</thead>\n<tbody>\n<tr>";
+  const std::string footer_2 = "</tr>\n</tbody>\n</table>\n</body>\n</html>";
+
   std::string page = webpage_template;
   for (size_t i = 0; i < host_num; i++){
     page += host_cols[i];

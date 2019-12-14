@@ -20,6 +20,7 @@
 #include <boost/algorithm/string/replace.hpp>
 #include <thread>
 #include <boost/thread.hpp>
+#include <boost/asio/signal_set.hpp>
 
 #define MAX_SESSION 5
 
@@ -57,6 +58,108 @@ std::string change_escape(std::string cmd){
   boost::replace_all(cmd, "\n", "&NewLine;");
   boost::replace_all(cmd, "\r", "");
   return cmd;
+}
+
+std::string output_command(std::string sid, std::string cmd){
+    cmd = change_escape(cmd);
+    // boost::replace_all(cmd, "\n", "&NewLine");
+    std::stringstream ss;
+    ss << "<script>document.getElementById('s" << 
+    sid << "').innerHTML += '<b>" << cmd << "&NewLine;</b>';</script>" << std::endl;
+    return ss.str();
+}
+
+std::string output_prompt(std::string sid){
+    std::stringstream ss;
+    ss << "<script>document.getElementById('s" << 
+    sid << "').innerHTML += '<b>" << "% " << "</b>';</script>" << std::endl;
+    return ss.str();
+}
+
+std::string output_shell(std::string sid, std::string str){
+    str = change_escape(str);
+    if(str == ""){
+        return str;
+    }
+    std::stringstream ss;
+    ss << "<script>document.getElementById('s" << sid << 
+                 "').innerHTML += '" << str <<"';</script>" << std::endl;
+    return ss.str();
+}
+
+const std::string webpage_template = R"(
+Content-type: text/html
+
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>NP Project 3 Console</title>
+    <link
+      rel="stylesheet"
+      href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"
+      integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO"
+      crossorigin="anonymous"
+    />
+    <link
+      href="https://fonts.googleapis.com/css?family=Source+Code+Pro"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      href="https://cdn0.iconfinder.com/data/icons/small-n-flat/24/678068-terminal-512.png"
+    />
+    <style>
+      * {
+        font-family: 'Source Code Pro', monospace;
+        font-size: 1rem !important;
+      }
+      body {
+        background-color: #212529;
+      }
+      pre {
+        color: #cccccc;
+      }
+      b {
+        color: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <table class="table table-dark table-bordered">
+      <thead>
+        <tr>
+)";
+
+
+
+          
+std::string generate_webpage(NpSession ns){
+  std::vector<std::string>  host_cols;
+  std::vector<std::string>  table_tds;
+
+  const std::string footer_1 = "</tr>\n</thead>\n<tbody>\n<tr>";
+  const std::string footer_2 = "</tr>\n</tbody>\n</table>\n</body>\n</html>";
+
+  std::string page = webpage_template;
+
+  for (size_t i = 0; i < ns.host_num; i++){
+      host_cols.push_back("<th scope=\"col\">"+ns.host_name[i]+":"+ns.host_port[i]+"</th>");
+      table_tds.push_back("<td><pre id=\"s"+std::to_string(i)+"\" class=\"mb-0\"></pre></td>");
+  }
+
+  for (size_t i = 0; i < ns.host_num; i++){
+    std::cout << ns.host_num << std::endl;
+    page += host_cols[i];
+  }
+  page += footer_1;
+  for (size_t i = 0; i < ns.host_num; i++){
+    page += table_tds[i];
+  }
+  page += footer_2;
+  return page;
 }
 
 std::string panel_html = R"(
@@ -330,15 +433,18 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
         std::string cmd_file;
         enum { max_length = 4096 };
         std::array<char, 4096> bytes;
+        tcp::socket _web_socket;
         
     public:
         // constructor
-        ShellSession(std::string host_ip, std::string host_port, std::string cmd_file, std::string sid)
+        ShellSession(std::string host_ip, std::string host_port, 
+        std::string cmd_file, std::string sid, ip::tcp::socket client_socket)
             : _query{host_ip, host_port},
               cmd_file(cmd_file),
               session_id(sid),
               cmd_idx(0),
-              s_id(std::atoi(sid.c_str()))
+              s_id(std::atoi(sid.c_str())),
+              _web_socket(move(client_socket))
         {
             read_cmd_from_file();
         }
@@ -360,6 +466,21 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
             }
         }
 
+        void do_write(std::string data){
+
+          std::cout << data << std::endl;
+          // write(_web_socket, buffer(data));
+          
+          // _web_socket.async_send(
+          //       buffer(data),
+          //       [this](boost::system::error_code ec, size_t /* length */) {
+          //           if (!ec){
+          //             do_read();
+          //             // std::cerr << "send to client error" << std::endl;
+          //           } 
+          //       });
+        }
+
         void do_send_cmd(){
               _socket.async_send(
                 buffer(cmds[cmd_idx]+"\r\n"),
@@ -378,16 +499,15 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                 if (!ec){
                     std::string recv_str(bytes.data());
                     bytes.fill(0);
-                    std::cout << recv_str;
-                    std::cout.flush();
+                    // std::cout << recv_str;
+                    // std::cout.flush();
 
-                    if (recv_str.find("%") != std::string::npos){
-                        
+                    if (recv_str.find("%") != std::string::npos){  
                         // std::cout << "<script>document.getElementById('s0').innerHTML += '';</script>" << std::endl;
                         // std::cout << recv_str.substr(0, recv_str.find("%")) << std::endl;
                         // usleep(100000);
-                        // output_shell(std::to_string(s_id), recv_str.substr(0, recv_str.find("%")));
-                        // output_prompt(std::to_string(s_id));
+                        do_write(output_shell(std::to_string(s_id), recv_str.substr(0, recv_str.find("%"))));
+                        do_write(output_prompt(std::to_string(s_id)));
                     }
                     else{
                         // if(bytes[0] != 0)
@@ -401,9 +521,9 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                         usleep(100000);
                         
                         // std::cout << "find %, cmds.size() = " << cmds.size() << std::endl;
-                        std::cout << cmds[cmd_idx] << std::endl;
+                        // std::cout << "s" << session_id << cmds[cmd_idx] << std::endl;
                         std::string r = cmds[cmd_idx] + "\r\n";
-                        // output_command(std::to_string(s_id), cmds[s_id][cmd_idx]);
+                        do_write(output_command(std::to_string(s_id), cmds[cmd_idx]));
 
                         usleep(100000);
                         do_send_cmd();
@@ -453,13 +573,36 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
   enum { max_length = 1024 };
   ip::tcp::socket _socket;
   array<char, max_length> _data;
+  // boost::asio::signal_set _signal;
 
  public:
   EchoSession(ip::tcp::socket socket) : _socket(move(socket)) {}
 
   void start() { do_read(); }
 
+  void do_write(std::string msg) {
+    auto self(shared_from_this());
+    _socket.async_send(
+        buffer(msg),
+        [this, self](boost::system::error_code ec, size_t /* length */) {
+          if(ec){
+            std::cerr << "async send failed" << std::endl;
+          }
+        });
+  }
+
  private:
+//  void wait_for_signal()
+//   {
+//     _signal.async_wait(
+//         [this](boost::system::error_code /*ec*/, int /*signo*/)
+//         {
+//             std::cout << "get signal" << std::endl;
+//             wait_for_signal();
+     
+//         });
+//   }
+
   void do_read() {
     auto self(shared_from_this());
     _socket.async_read_some(
@@ -505,11 +648,19 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
             if(uri_file == "/console.cgi"){
                 write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
                 NpSession ns = parse_query(query_str);
+                std::cout << "generate_webpage" << std::endl;
+                do_write(generate_webpage(ns));
+                std::cout << "generate_webpage finish" << std::endl;
+
                 // ShellSession s1("127.0.0.1", "1240", "t1.txt", "0");
                 // s1.start();
                 std::vector<ShellSession> shell_sessions;
                 for (size_t i = 0; i < ns.host_num; i++){
-                  shell_sessions.push_back(ShellSession(ns.host_name[i], ns.host_port[i], ns.file_name[i], std::to_string(i)));
+                  shell_sessions.push_back(ShellSession(
+                    ns.host_name[i], ns.host_port[i], 
+                    ns.file_name[i], std::to_string(i),
+                    move(_socket)
+                    ));
                 }
                 for (size_t i = 0; i < ns.host_num; i++){
                   shell_sessions[i].start();
@@ -522,17 +673,6 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
             
           }
           
-        });
-  }
-
-  void do_write(std::string msg) {
-    auto self(shared_from_this());
-    _socket.async_send(
-        buffer(msg),
-        [this, self](boost::system::error_code ec, size_t /* length */) {
-          if(ec){
-            std::cerr << "async send failed" << std::endl;
-          }
         });
   }
 
