@@ -20,6 +20,7 @@
 #include <boost/process.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/replace.hpp>
+#include <thread>
 
 
 #define MAX_REQUEST_NUM 5
@@ -202,15 +203,8 @@ class EchoServer {
   }
 
  private:
-  
-
-  void do_accept() {
-    _acceptor.async_accept([this](boost::system::error_code ec, ip::tcp::socket client_socket) {
-      // cout << _socket.remote_endpoint().address().to_string() << endl;
-      // if (!ec) make_shared<EchoSession>(move(_socket))->start();
-      if (!ec){
-
-        // take client socket        
+  void handle_client(ip::tcp::socket& client_socket){
+    // take client socket        
         _socket = std::move(client_socket);
 
         // prepare for fork
@@ -294,19 +288,8 @@ class EchoServer {
           // execlp("console.cgi", "console.cgi", NULL);
           execlp(target_cgi.c_str(), target_cgi.c_str(), NULL);
           cerr << "exec error" << endl;
-
-            // write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
-            // write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>Hello</h1>\r\n"));
-            
-            // boost::process::ipstream pipe_stream;
-            // boost::process::child c("ping 8.8.8.8 -c 10", boost::process::std_out > pipe_stream);
-            // // boost::process::child c("./hello.cgi", boost::process::std_out > pipe_stream);
-
-            //  std::string line;
-
           
           exit(0);
-
         }
         else{
           // parent or fork failed
@@ -316,9 +299,137 @@ class EchoServer {
           _socket.close();
           do_accept();
         }
+  }
 
+  void do_accept() {
+    _acceptor.async_accept([this](boost::system::error_code ec, ip::tcp::socket client_socket) {
+      if (!ec){
+        // thread cgiThread(handle_client, client_socket);
+        // // handle_client(client_socket);
+        // cgiThread.detach();
+
+        
+
+        // take client socket        
+        _socket = std::move(client_socket);
+
+        
+
+
+
+          int client_fd = _socket.native_handle();
+          
+          // _socket.async_read_some(buffer(bytes), read_handler);
+
+          // execute the child process (cgi)
+          // close(STDOUT_FILENO);
+          // close(STDIN_FILENO);
+          // close(STDERR_FILENO);
+
+          int save_stdin = dup(STDIN_FILENO);
+          int save_stdout = dup(STDOUT_FILENO);
+          int save_stderr = dup(STDERR_FILENO);
+
+          dup2(client_fd, STDIN_FILENO);
+
+          // if (dup(client_fd) != STDIN_FILENO || dup(client_fd) != STDOUT_FILENO || dup(client_fd) != STDERR_FILENO){
+          //       std::cout << "can't dup client socket for stdin/out/err" << std::endl;
+          //       exit(1);
+          // }
+
+
+
+          std::string req_token;
+          std::string req_string = "";
+
+          // get cin until GET
+          while(cin >> req_token){
+            cout << req_token << endl;
+            if(req_token != "GET"){
+              continue;
+            }
+            else{
+              req_string += req_token + " ";
+              break;
+            }
+          }
+
+          while(cin >> req_token){
+            cout << req_token << endl;
+            req_string += req_token;
+            req_string += " ";
+            if(req_token == "Upgrade-Insecure-Requests:"){
+              break;
+            }
+          }
+          // cin.ignore(std::numeric_limits<std::streamsize>::max());
+
+          // stringstream tmp_ss;
+          // tmp_ss << _socket.local_endpoint().address();
+
+          std::string uri_file = parse(req_string, "");
+          std::cout << "remote addr" << std::endl;
+          std::cout << _socket.remote_endpoint().address() << std::endl;
+          std::cout << _socket.remote_endpoint().port() << std::endl;
+          std::string target_cgi = "."+uri_file;
+          std::cout << "execute" << target_cgi << std::endl;
+
+          
+
+          dup2(client_fd, STDOUT_FILENO);
+
+          // check if file exist
+          if (!boost::filesystem::exists("."+uri_file)){
+            cout << "HTTP/1.1 404 Not Found" << endl;
+            cout << "Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n" << endl;
+            exit(0);
+          }
+
+          std::string set_env_str;
+          set_env_str = "REMOTE_ADDR"+_socket.remote_endpoint().address().to_string();
+          setenv("REMOTE_ADDR", _socket.remote_endpoint().address().to_string().c_str(), 1);
+          set_env_str = "REMOTE_PORT"+_socket.remote_endpoint().port();
+          setenv("REMOTE_PORT", std::to_string(_socket.remote_endpoint().port()).c_str(), 1);
+          // std::cout << "setenv st" << st << std::endl;
+
+          
+
+          
+          cout << "HTTP/1.1 200 OK" << endl;
+
+        // prepare for fork
+        _io_context.notify_fork(boost::asio::io_context::fork_prepare);
+        if (fork() == 0){
+          // child process
+          _io_context.notify_fork(boost::asio::io_context::fork_child);
+
+          // child don't need listener
+          _acceptor.close();
+
+          // unregister SIGCHLD
+          _signal.cancel();          
+          
+          // execlp("console.cgi", "console.cgi", NULL);
+          execlp(target_cgi.c_str(), target_cgi.c_str(), NULL);
+          cerr << "exec error" << endl;
+          
+          exit(0);
+        }
+        else{
+          // parent or fork failed
+          _io_context.notify_fork(boost::asio::io_context::fork_parent);
+          dup2(save_stdout, STDOUT_FILENO);
+          dup2(save_stdin, STDIN_FILENO);
+
+          // the socket is forward to the cgi, close the socket
+          _socket.close();
+          do_accept();
+        }
+        
+      
 
       }
+      
       else{
             std::cerr << "accept error: " << ec.message() << std::endl;
             do_accept();
