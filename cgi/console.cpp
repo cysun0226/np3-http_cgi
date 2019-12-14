@@ -8,6 +8,7 @@
 #include <vector>
 #include <unistd.h>
 #include <csignal>
+#include <sstream>
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/io_service.hpp>
@@ -15,6 +16,8 @@
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/signal_set.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/classification.hpp>
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -41,6 +44,11 @@ std::vector<std::string> cmds;
 int cmd_idx = 0;
 std::string session_id;
 int session_idx;
+
+std::string host_name[MAX_SESSION];
+std::string host_port[MAX_SESSION];
+std::string file_name[MAX_SESSION];
+int host_num = 0;
 
 // void handler(
 //     const boost::system::error_code& error,
@@ -245,10 +253,46 @@ const std::string webpage_template = R"(
 </html>
 )";
 
+void parse_query(std::string query_str){
+  std::stringstream ss;
+  ss.str(query_str);
+  std::string str;
 
+  std::vector<std::string> tokens;
+  boost::split( tokens, query_str, boost::is_any_of( "&" ), boost::token_compress_on);
+  for( std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it ){
+    if(it->at(0) == 'h'){
+      host_num++;
+      std::string hid = it->substr(0, it->find("="));
+      host_name[atoi(hid.substr(1).c_str())] = it->substr(it->find("=")+1);
+    }
+    if(it->at(0) == 'p'){
+      std::string pid = it->substr(0, it->find("="));
+      host_port[atoi(pid.substr(1).c_str())] = it->substr(it->find("=")+1);
+    }
+    if(it->at(0) == 'f'){
+      std::string fid = it->substr(0, it->find("="));
+      file_name[atoi(fid.substr(1).c_str())] = it->substr(it->find("=")+1);
+    }
+  }
+}
 
 
 int main(int argc, char** argv) {
+    std::cout << "Content-type: text/html" << std::endl << std::endl;
+    char* ptr = getenv("QUERY_STRING");
+    std::cout << "<p>" << ptr << "</p>" << std::endl;
+    std::string query_str(ptr);
+    parse_query(query_str);
+
+    // for (size_t i = 0; i < host_num; i++){
+    //   std::cout << host_name[i] << std::endl;
+    //   std::cout << host_port[i] << std::endl;
+    //   std::cout << file_name[i] << std::endl;
+    // }
+
+    // exit(0);
+
     char default_path[] = "PATH=/bin:bin:.:/usr/bin/env:/home/cysun/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin";
     putenv(default_path);
 
@@ -263,7 +307,7 @@ int main(int argc, char** argv) {
         if(pid == 0){ // child
             // np_client("127.0.0.1", "124"+std::to_string(i), "t1.txt", std::to_string(i));
             
-            execlp("np_client", "np_client", "127.0.0.1", ("124"+std::to_string(i)).c_str(), ("t"+std::to_string(i+1)+".txt").c_str(), std::to_string(i).c_str(), NULL);
+            execlp("np_client", "np_client", host_name[i].c_str(), host_port[i].c_str(), file_name[i].c_str(), std::to_string(i).c_str(), NULL);
             std::cout << "can't execute" << std::endl;
             exit(0);
         }

@@ -55,40 +55,7 @@ typedef struct {
 (i) REMOTE PORT
 */
 
-void parse_query(std::string query_str, Request* req){
-  stringstream ss;
-  ss.str(query_str);
-  string str;
-  string host_name[MAX_REQUEST_NUM];
-  string host_port[MAX_REQUEST_NUM];
-  string file_name[MAX_REQUEST_NUM];
 
-  vector<string> tokens;
-  boost::split( tokens, query_str, boost::is_any_of( "&" ), boost::token_compress_on);
-  int host_num = 0;
-  for( vector<string>::iterator it = tokens.begin(); it != tokens.end(); ++it ){
-    if(it->at(0) == 'h'){
-      host_num++;
-      std::string hid = it->substr(0, it->find("="));
-      host_name[atoi(hid.substr(1).c_str())] = it->substr(it->find("=")+1);
-    }
-    if(it->at(0) == 'p'){
-      std::string pid = it->substr(0, it->find("="));
-      host_port[atoi(pid.substr(1).c_str())] = it->substr(it->find("=")+1);
-    }
-    if(it->at(0) == 'f'){
-      std::string fid = it->substr(0, it->find("="));
-      file_name[atoi(fid.substr(1).c_str())] = it->substr(it->find("=")+1);
-    }
-  }
-
-  for (size_t i = 0; i < host_num; i++){
-    cout << host_name[i] << endl;
-    cout << host_port[i] << endl;
-    cout << file_name[i] << endl;
-  }
-  
-}
 
 std::string parse(std::string req_str, std::string server_ip){
     boost::replace_all(req_str, "\\", "");
@@ -296,6 +263,8 @@ class EchoServer {
           std::cout << "remote addr" << std::endl;
           std::cout << _socket.remote_endpoint().address() << std::endl;
           std::cout << _socket.remote_endpoint().port() << std::endl;
+          std::string target_cgi = "."+uri_file;
+          std::cout << "execute" << target_cgi << std::endl;
 
           
 
@@ -320,7 +289,7 @@ class EchoServer {
           
           cout << "HTTP/1.1 200 OK" << endl;
 
-          std::string target_cgi = "."+uri_file;
+          
           
           // execlp("console.cgi", "console.cgi", NULL);
           execlp(target_cgi.c_str(), target_cgi.c_str(), NULL);
