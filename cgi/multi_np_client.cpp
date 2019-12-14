@@ -181,7 +181,9 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
 };
 
 int main(){
-    ShellSession s1("127.0.0.1", "1240", "t1.txt", "1");
-    ShellSession s2("127.0.0.1", "1241", "t1.txt", "1");
+    // ShellSession s1("127.0.0.1", "1240", "t1.txt", "1");
+    ShellSession s1("nplinux1.cs.nctu.edu.tw", "1241", "t1.txt", "0");
+    ShellSession s2("nplinux1.cs.nctu.edu.tw", "1242", "t2.txt", "1");
+    ShellSession s3("nplinux1.cs.nctu.edu.tw", "1243", "t3.txt", "2");
     ioservice.run();
 }

@@ -23,7 +23,11 @@
 #include <sys/wait.h>
 
 #define MAX_SESSION 5
-
+std::string host_name[MAX_SESSION];
+std::string host_port[MAX_SESSION];
+std::string file_name[MAX_SESSION];
+std::vector <std::string> cmds[MAX_SESSION+1];
+int host_num = 0;
 
 // ==================================================================================
 // np client
@@ -32,40 +36,20 @@ using namespace boost::asio;
 using namespace boost::asio::ip;
 
 io_service ioservice;
-tcp::resolver resolv{ioservice};
-tcp::socket tcp_socket{ioservice};
-// tcp::resolver resolv;
-// tcp::socket tcp_socket;
 
-std::array<char, 4096> bytes;
-
-bool receive_prompt = false;
-std::vector<std::string> cmds;
-int cmd_idx = 0;
-std::string session_id;
-int session_idx;
-
-std::string host_name[MAX_SESSION];
-std::string host_port[MAX_SESSION];
-std::string file_name[MAX_SESSION];
-int host_num = 0;
-
-// void handler(
-//     const boost::system::error_code& error,
-//     int signal_number)
-// {
-//   if (!error)
-//   {
-//     std::cout << "get SIGINT" << std::endl;
-//     tcp_socket.cancel();
-//     tcp_socket.close();
-//     ioservice.stop();
-//   }
-// }
-
+std::string change_escape(std::string cmd){
+  boost::replace_all(cmd, "&", "&amp;");
+  boost::replace_all(cmd, "\"", "&quot;");
+  boost::replace_all(cmd, "\'", "&apos;");
+  boost::replace_all(cmd, "<", "&lt;");
+  boost::replace_all(cmd, ">", "&gt;");
+  boost::replace_all(cmd, "\n", "&NewLine;");
+  boost::replace_all(cmd, "\r", "");
+  return cmd;
+}
 
 void output_command(std::string sid, std::string cmd){
-    boost::replace_all(cmd, "\r", "");
+    cmd = change_escape(cmd);
     // boost::replace_all(cmd, "\n", "&NewLine");
     std::cout << "<script>document.getElementById('s" << 
     sid << "').innerHTML += '<b>" << cmd << "&NewLine;</b>';</script>" << std::endl;
@@ -79,120 +63,147 @@ void output_prompt(std::string sid){
 }
 
 void output_shell(std::string sid, std::string str){
-    boost::replace_all(str, "\r", "");
-    boost::replace_all(str, "\n", "&NewLine;");
+    str = change_escape(str);
+    // if(str == ""){
+    //     return;
+    // }
     std::cout << "<script>document.getElementById('s" << sid << 
                  "').innerHTML += '" << str <<"';</script>" << std::endl;
     std::cout.flush();
 }
 
-void read_handler(const boost::system::error_code &ec,
-  std::size_t bytes_transferred)
-{
-  if (!ec)
-  {
-    std::string recv_str(bytes.data());
-    std::cout << recv_str << std::endl;
-    // left
-    // if (recv_str.find("left. ***") != std::string::npos){
-    //     output_shell(session_id, recv_str);
-    //     tcp_socket.shutdown(socket_base::shutdown_type::shutdown_both);
-    //     tcp_socket.close();
-    // }
-
-    if (recv_str.find("% ") != std::string::npos){
-        output_shell(session_id, recv_str.substr(0, recv_str.find("%")));
-        // std::cout << recv_str.substr(0, recv_str.find("%")) << std::endl;
-        usleep(100000);
-        output_prompt(session_id);
-    }
-    else{
-        output_shell(session_id, recv_str);
-    }
-    
-    // std::cout.write(bytes.data(), bytes_transferred);
-    
-    bytes.fill(0);
-    
-    // send command
-    if (recv_str.find("% ") != std::string::npos){ // find prompt
-        // std::cout.write(bytes.data(), bytes_transferred);
-        // std::cout.flush();
+class ShellSession : public std::enable_shared_from_this<ShellSession> {
+    private:
+        tcp::resolver _resolv{ioservice};
+        tcp::socket _socket{ioservice};
+        tcp::resolver::query _query;
+        // std::vector<std::string> cmds;
+        std::array<char, 4096> _cmd_buffer;
+        int cmd_idx;
+        std::string session_id;
+        int s_id;
+        std::string host_ip;
+        std::string host_port;
+        std::string cmd_file;
+        enum { max_length = 4096 };
+        std::array<char, 4096> bytes;
         
-        usleep(100000);
-        receive_prompt = true;
-        
-        std::string r = cmds[cmd_idx] + "\r\n";
-        // std::cout << cmds[cmd_idx] << std::endl;
-        output_command(session_id, cmds[cmd_idx]);
-        std::cout.flush();
+    public:
+        // constructor
+        ShellSession(std::string host_ip, std::string host_port, std::string cmd_file, std::string sid)
+            : _query{host_ip, host_port},
+              cmd_file(cmd_file),
+              session_id(sid),
+              cmd_idx(0),
+              s_id(std::atoi(sid.c_str()))
+        {
+            read_cmd_from_file();
+        }
+        void start() { do_resolve(); }
+    private:
+        bool read_cmd_from_file(){
+            std::string cmd_line;
+            std::ifstream input_file("./test_case/"+std::string(cmd_file));
+            if(input_file.is_open()){
+                while ( getline (input_file, cmd_line)){
+                    cmds[s_id].push_back(cmd_line);
+                }
+                input_file.close();
+                return true;
+            }
+            else{
+                std::cout << "<p> can't open " << cmd_file << "</p>" << std::endl;
+                return false;
+            }
+        }
 
-        usleep(100000);
-        write(tcp_socket, buffer(r));
-        cmd_idx++;
-        tcp_socket.async_read_some(buffer(bytes), read_handler);
-    }
-    else{
-        // std::cout.write(bytes.data(), bytes_transferred);
-        // std::cout.flush();
-        tcp_socket.async_read_some(buffer(bytes), read_handler);
-    }
-    
-    // clear received content
-    // bytes.fill(0);
+        void do_send_cmd(){
+              _socket.async_send(
+                buffer(cmds[s_id][cmd_idx]+"\r\n"),
+                [this](boost::system::error_code ec, size_t /* length */) {
+                    if (!ec){
+                        cmd_idx++;
+                        do_read();
+                    } 
+                });
+        }
 
-    // tcp_socket.async_read_some(buffer(bytes), read_handler);
-  }
-}
+        void do_read() {
+            _socket.async_read_some(
+                buffer(bytes, max_length),
+                [this](boost::system::error_code ec, size_t length) {
+                if (!ec){
+                    std::string recv_str(bytes.data());
+                    bytes.fill(0);
+                    // std::cout << recv_str;
+                    // std::cout.flush();
 
-void connect_handler(const boost::system::error_code &ec)
-{
-  if (!ec){
-    // std::cout << "<script>document.getElementById('s1').innerHTML += '';</script>" << std::endl;
-    // std::cout.flush();
-    tcp_socket.async_read_some(buffer(bytes), read_handler);
-  }
-  else{
-        std::cerr << "can't connect to np_server" << std::endl;
-  }
-}
+                    if (recv_str.find("%") != std::string::npos){
+                        
+                        // std::cout << "<script>document.getElementById('s0').innerHTML += '';</script>" << std::endl;
+                        // std::cout << recv_str.substr(0, recv_str.find("%")) << std::endl;
+                        // usleep(100000);
+                        output_shell(std::to_string(s_id), recv_str.substr(0, recv_str.find("%")));
+                        output_prompt(std::to_string(s_id));
+                    }
+                    else{
+                        // if(bytes[0] != 0)
+                        // std::cout << "# get data" << std::endl;
+                        // std::cout << recv_str << std::endl;
+                        output_shell(std::to_string(s_id), recv_str);
+                    }
+                    
+                    // find prompt, send command
+                    if (recv_str.find("%") != std::string::npos){ // find prompt
+                        usleep(100000);
+                        
+                        // std::cout << "find %, cmds.size() = " << cmds.size() << std::endl;
+                        // std::cout << cmds[s_id][cmd_idx] << std::endl;
+                        std::string r = cmds[s_id][cmd_idx] + "\r\n";
+                        output_command(std::to_string(s_id), cmds[s_id][cmd_idx]);
 
-void resolve_handler(const boost::system::error_code &ec,
-  tcp::resolver::iterator it)
-{
-  if (!ec){
-      tcp_socket.async_connect(*it, connect_handler);
-  }
-  else{
-      std::cout << "can't resolve" << std::endl;
-  }
-    
+                        usleep(100000);
+                        do_send_cmd();
+                    }
+                    else{
+                        // std::cout.write(bytes.data(), bytes_transferred);
+                        // std::cout.flush();
+                        // output_shell(session_id, recv_str);
+                        do_read();
+                    }
+                }
+                else{
+                    output_command(std::to_string(s_id), "(connection close)");
+                }
+            });
+        }
 
-}
+        void do_connect(tcp::resolver::iterator it){
+          // std::cout << "cmds.size() = " << cmds.size() << std::endl;
+            _socket.async_connect(*it, [this](boost::system::error_code ec){
+                if (!ec){
+                    // read_cmd_from_file();
+                    // std::cout << "cmds.size() = " << cmds.size() << std::endl;
+                    do_read();
+                }
+                else{
+                    std::cerr << "can't connect to np server" << std::endl;
+                }
+            });
+        }
 
-int np_client(std::string ip, std::string port, std::string cmd_file, std::string sid){
-    std::cout << "np_client" <<  sid << std::endl;
-   std::string cmd_line;
-  std::ifstream input_file("./test_case/"+cmd_file);
-  if(input_file.is_open()){
-      while ( getline (input_file, cmd_line)){
-      cmds.push_back(cmd_line);
-    }
-    input_file.close();
-  }
-  else{
-      std::cout << "<p> can't open " << cmd_file << "</p>" << std::endl;
-      return 1;
-  }
-  session_id = sid;
-//   boost::asio::signal_set signals(ioservice, SIGINT, SIGTERM);
-//   signals.async_wait(handler);
-  
-
-  tcp::resolver::query q{ip, port};
-  resolv.async_resolve(q, resolve_handler);
-  ioservice.run();
-}
+         void do_resolve() {
+          //  std::cout << "cmds.size() = " << cmds.size() << std::endl;
+            _resolv.async_resolve(_query, [this](boost::system::error_code ec, tcp::resolver::iterator it){
+                if(!ec){
+                    do_connect(it);
+                }
+                else{
+                    std::cerr << "can't connect to np_server" << std::endl;
+                }
+            });
+        }
+};
 
 
 const std::string webpage_template = R"(
@@ -236,22 +247,29 @@ const std::string webpage_template = R"(
     <table class="table table-dark table-bordered">
       <thead>
         <tr>
-          <th scope="col">nplinux7.cs.nctu.edu.tw:3333</th>
-          <th scope="col">nplinux8.cs.nctu.edu.tw:4444</th>
-          <th scope="col">nplinux9.cs.nctu.edu.tw:5555</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><pre id="s0" class="mb-0"></pre></td>
-          <td><pre id="s1" class="mb-0"></pre></td>
-          <td><pre id="s2" class="mb-0"></pre></td>
-        </tr>
-      </tbody>
-    </table>
-  </body>
-</html>
 )";
+
+std::vector<std::string>  host_cols;
+std::vector<std::string>  table_tds;
+
+const std::string footer_1 = "</tr>\n</thead>\n<tbody>\n<tr>";
+const std::string footer_2 = "</tr>\n</tbody>\n</table>\n</body>\n</html>";
+
+          
+std::string generate_webpage(){
+  std::string page = webpage_template;
+  for (size_t i = 0; i < host_num; i++){
+    page += host_cols[i];
+  }
+  page += footer_1;
+  for (size_t i = 0; i < host_num; i++){
+    page += table_tds[i];
+  }
+  page += footer_2;
+  return page;
+}
+        
+
 
 void parse_query(std::string query_str){
   std::stringstream ss;
@@ -262,9 +280,11 @@ void parse_query(std::string query_str){
   boost::split( tokens, query_str, boost::is_any_of( "&" ), boost::token_compress_on);
   for( std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it ){
     if(it->at(0) == 'h'){
-      host_num++;
       std::string hid = it->substr(0, it->find("="));
       host_name[atoi(hid.substr(1).c_str())] = it->substr(it->find("=")+1);
+      if(it->substr(it->find("=")+1).size()>1){
+        host_num++;
+      }
     }
     if(it->at(0) == 'p'){
       std::string pid = it->substr(0, it->find("="));
@@ -279,53 +299,36 @@ void parse_query(std::string query_str){
 
 
 int main(int argc, char** argv) {
-    std::cout << "Content-type: text/html" << std::endl << std::endl;
     char* ptr = getenv("QUERY_STRING");
-    std::cout << "<p>" << ptr << "</p>" << std::endl;
     std::string query_str(ptr);
     parse_query(query_str);
 
-    // for (size_t i = 0; i < host_num; i++){
-    //   std::cout << host_name[i] << std::endl;
-    //   std::cout << host_port[i] << std::endl;
-    //   std::cout << file_name[i] << std::endl;
-    // }
+    for (size_t i = 0; i < host_num; i++){
+      host_cols.push_back("<th scope=\"col\">"+host_name[i]+":"+host_port[i]+"</th>");
+      table_tds.push_back("<td><pre id=\"s"+std::to_string(i)+"\" class=\"mb-0\"></pre></td>");
+      // std::cout << host_name[i] << std::endl;
+      // std::cout << host_port[i] << std::endl;
+      // std::cout << file_name[i] << std::endl;
+    }
 
     // exit(0);
 
-    char default_path[] = "PATH=/bin:bin:.:/usr/bin/env:/home/cysun/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin";
-    putenv(default_path);
-
     std::cout << "Content-type: text/html" << std::endl << std::endl;
-    std::cout << webpage_template << std::endl;
+    std::cout << generate_webpage() << std::endl;
 
-    std::vector<pid_t> session_pid;
+    // exit(0);
 
-    for (size_t i = 0; i < 3; i++){
-        // np_client("127.0.0.1", "124"+std::to_string(i), "t1.txt", std::to_string(i));
-        pid_t pid = fork();
-        if(pid == 0){ // child
-            // np_client("127.0.0.1", "124"+std::to_string(i), "t1.txt", std::to_string(i));
-            
-            execlp("np_client", "np_client", host_name[i].c_str(), host_port[i].c_str(), file_name[i].c_str(), std::to_string(i).c_str(), NULL);
-            std::cout << "can't execute" << std::endl;
-            exit(0);
-        }
-        session_pid.push_back(pid);
+    
+    // build np_server connection
+    std::vector<ShellSession> np_sessions;
+    for (size_t i = 0; i < host_num; i++){
+      np_sessions.push_back(ShellSession(host_name[i], host_port[i], file_name[i], std::to_string(i)));
+    }
+    for (size_t i = 0; i < host_num; i++){
+      np_sessions[i].start();
     }
 
-    int status;
-    wait(&status);
-    wait(&status);
-    wait(&status);
-    // waitpid(session_pid[0], &status, 0);
-    // waitpid(session_pid[1], &status, 0);
-    // waitpid(session_pid[2], &status, 0);
-
-    
-    
-    
-    // np_client("127.0.0.1", "1237", "t1.txt", "1");
+    ioservice.run();
 
     return 0;
 }
