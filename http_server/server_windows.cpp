@@ -418,6 +418,12 @@ NpSession parse_query(std::string query_str){
   return ns;
 }
 
+class EchoSession;
+void EchoSession::do_write(std::string data){
+  std::cout << data << std::endl;
+}
+
+
 class ShellSession : public std::enable_shared_from_this<ShellSession> {
     private:
         tcp::resolver _resolv{np_io_service};
@@ -433,18 +439,21 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
         std::string cmd_file;
         enum { max_length = 4096 };
         std::array<char, 4096> bytes;
-        tcp::socket _web_socket;
+        // tcp::socket _web_socket;
+        EchoSession* es;
         
     public:
         // constructor
         ShellSession(std::string host_ip, std::string host_port, 
-        std::string cmd_file, std::string sid, ip::tcp::socket client_socket)
+        std::string cmd_file, std::string sid, EchoSession* es)
             : _query{host_ip, host_port},
               cmd_file(cmd_file),
               session_id(sid),
               cmd_idx(0),
               s_id(std::atoi(sid.c_str())),
-              _web_socket(move(client_socket))
+              es(es)
+              // _web_socket(move(client_socket)),
+              
         {
             read_cmd_from_file();
         }
@@ -467,6 +476,7 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
         }
 
         void do_write(std::string data){
+          es->do_write("hi");
 
           std::cout << data << std::endl;
           // write(_web_socket, buffer(data));
@@ -581,14 +591,15 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
   void start() { do_read(); }
 
   void do_write(std::string msg) {
-    auto self(shared_from_this());
-    _socket.async_send(
-        buffer(msg),
-        [this, self](boost::system::error_code ec, size_t /* length */) {
-          if(ec){
-            std::cerr << "async send failed" << std::endl;
-          }
-        });
+    std::cout << msg << std::endl;
+    // auto self(shared_from_this());
+    // _socket.async_send(
+    //     buffer(msg),
+    //     [this, self](boost::system::error_code ec, size_t /* length */) {
+    //       if(ec){
+    //         std::cerr << "async send failed" << std::endl;
+    //       }
+    //     });
   }
 
  private:
@@ -659,7 +670,7 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
                   shell_sessions.push_back(ShellSession(
                     ns.host_name[i], ns.host_port[i], 
                     ns.file_name[i], std::to_string(i),
-                    move(_socket)
+                    this
                     ));
                 }
                 for (size_t i = 0; i < ns.host_num; i++){
