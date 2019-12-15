@@ -5,10 +5,17 @@ CXX_INCLUDE_PARAMS=$(addprefix -I , $(CXX_INCLUDE_DIRS))
 CXX_LIB_DIRS=/usr/local/lib
 CXX_LIB_PARAMS=$(addprefix -L , $(CXX_LIB_DIRS))
 
-all: server
+all: server console.cgi
 
-%: %.cpp
-	$(CXX) $< -o $@ $(CXX_INCLUDE_PARAMS) $(CXX_LIB_PARAMS) $(CXXFLAGS)
+server : server.cpp
+	$(CXX) server.cpp -o server $(CXX_INCLUDE_PARAMS) $(CXX_LIB_PARAMS) $(CXXFLAGS)
+
+console.cgi : console.cpp
+	$(CXX) console.cpp -o console.cgi $(CXX_INCLUDE_PARAMS) $(CXX_LIB_PARAMS) $(CXXFLAGS)
+
+# %: %.cpp
+# 	$(CXX) $< -o $@ $(CXX_INCLUDE_PARAMS) $(CXX_LIB_PARAMS) $(CXXFLAGS)
 
 clean:
 	rm -f *.cgi
+	rm -f server
