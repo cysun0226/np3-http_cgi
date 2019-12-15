@@ -418,16 +418,13 @@ NpSession parse_query(std::string query_str){
   return ns;
 }
 
-class EchoSession;
-void EchoSession::do_write(std::string data){
-  std::cout << data << std::endl;
-}
 
+class EchoSession;
 
 class ShellSession : public std::enable_shared_from_this<ShellSession> {
     private:
-        tcp::resolver _resolv{np_io_service};
-        tcp::socket _socket{np_io_service};
+        tcp::resolver _resolv{global_io_service};
+        tcp::socket _socket{global_io_service};
         tcp::resolver::query _query;
         std::vector<std::string> cmds;
         std::array<char, 4096> _cmd_buffer;
@@ -439,20 +436,21 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
         std::string cmd_file;
         enum { max_length = 4096 };
         std::array<char, 4096> bytes;
-        // tcp::socket _web_socket;
-        EchoSession* es;
+        tcp::socket* _web_socket;
+        std::shared_ptr<EchoSession> es_ptr;
         
     public:
         // constructor
         ShellSession(std::string host_ip, std::string host_port, 
-        std::string cmd_file, std::string sid, EchoSession* es)
+        std::string cmd_file, std::string sid, std::shared_ptr<EchoSession> es,
+        tcp::socket* client_socket)
             : _query{host_ip, host_port},
               cmd_file(cmd_file),
               session_id(sid),
               cmd_idx(0),
               s_id(std::atoi(sid.c_str())),
-              es(es)
-              // _web_socket(move(client_socket)),
+              es_ptr(es),
+              _web_socket(client_socket)
               
         {
             read_cmd_from_file();
@@ -476,19 +474,19 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
         }
 
         void do_write(std::string data){
-          es->do_write("hi");
-
-          std::cout << data << std::endl;
+          // std::cout << data << std::endl;
           // write(_web_socket, buffer(data));
           
-          // _web_socket.async_send(
-          //       buffer(data),
-          //       [this](boost::system::error_code ec, size_t /* length */) {
-          //           if (!ec){
-          //             do_read();
-          //             // std::cerr << "send to client error" << std::endl;
-          //           } 
-          //       });
+          _web_socket->async_send(
+                buffer(data),
+                [this](boost::system::error_code ec, size_t /* length */) {
+                    if (!ec){
+                      // do_read();
+                    }
+                    else{
+                      std::cout << "async send failed" << std::endl;
+                    }
+                });
         }
 
         void do_send_cmd(){
@@ -497,7 +495,9 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                 [this](boost::system::error_code ec, size_t /* length */) {
                     if (!ec){
                         cmd_idx++;
-                        do_read();
+                        if(cmd_idx != cmds.size()){
+                          do_read();
+                        }
                     } 
                 });
         }
@@ -509,7 +509,7 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                 if (!ec){
                     std::string recv_str(bytes.data());
                     bytes.fill(0);
-                    // std::cout << recv_str;
+                    std::cout << recv_str;
                     // std::cout.flush();
 
                     if (recv_str.find("%") != std::string::npos){  
@@ -523,7 +523,7 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                         // if(bytes[0] != 0)
                         // std::cout << "# get data" << std::endl;
                         // std::cout << recv_str << std::endl;
-                        // output_shell(std::to_string(s_id), recv_str);
+                        do_write(output_shell(std::to_string(s_id), recv_str));
                     }
                     
                     // find prompt, send command
@@ -531,7 +531,7 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                         usleep(100000);
                         
                         // std::cout << "find %, cmds.size() = " << cmds.size() << std::endl;
-                        // std::cout << "s" << session_id << cmds[cmd_idx] << std::endl;
+                        std::cout << "s" << session_id << " : " << cmds[cmd_idx] << std::endl;
                         std::string r = cmds[cmd_idx] + "\r\n";
                         do_write(output_command(std::to_string(s_id), cmds[cmd_idx]));
 
@@ -591,28 +591,18 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
   void start() { do_read(); }
 
   void do_write(std::string msg) {
-    std::cout << msg << std::endl;
-    // auto self(shared_from_this());
-    // _socket.async_send(
-    //     buffer(msg),
-    //     [this, self](boost::system::error_code ec, size_t /* length */) {
-    //       if(ec){
-    //         std::cerr << "async send failed" << std::endl;
-    //       }
-    //     });
+    // std::cout << msg << std::endl;
+    auto self(shared_from_this());
+    _socket.async_send(
+        buffer(msg),
+        [this, self](boost::system::error_code ec, size_t /* length */) {
+          if(ec){
+            std::cerr << "async send failed" << std::endl;
+          }
+        });
   }
 
  private:
-//  void wait_for_signal()
-//   {
-//     _signal.async_wait(
-//         [this](boost::system::error_code /*ec*/, int /*signo*/)
-//         {
-//             std::cout << "get signal" << std::endl;
-//             wait_for_signal();
-     
-//         });
-//   }
 
   void do_read() {
     auto self(shared_from_this());
@@ -654,6 +644,7 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
             if(uri_file == "/panel.cgi"){
                 write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
                 do_write(panel_html);
+                
             }
 
             if(uri_file == "/console.cgi"){
@@ -670,18 +661,25 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
                   shell_sessions.push_back(ShellSession(
                     ns.host_name[i], ns.host_port[i], 
                     ns.file_name[i], std::to_string(i),
-                    this
+                    shared_from_this(),
+                    &_socket
                     ));
                 }
                 for (size_t i = 0; i < ns.host_num; i++){
                   shell_sessions[i].start();
                 }
-                threads.create_thread(boost::bind(&boost::asio::io_service::run, &np_io_service));
-                threads.join_all();
+                global_io_service.run();
+                
+
+                // boost::thread shell_thread(boost::bind(&boost::asio::io_service::run, boost::ref(np_io_service)));
+
+                // threads.create_thread(boost::bind(&boost::asio::io_service::run, &np_io_service));
+                // threads.join_all();
+                // shell_thread.join();
+                // shell_thread.detach();
+                
                 
             }
-
-            
           }
           
         });
