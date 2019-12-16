@@ -459,9 +459,8 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                 [this](boost::system::error_code ec, size_t /* length */) {
                     if (!ec){
                         cmd_idx++;
-                        if(cmd_idx != cmds.size()){
-                          do_read();
-                        }
+                        do_read();
+                        
                     } 
                 });
         }
@@ -487,7 +486,10 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                         // std::cout << "# get data" << std::endl;
                         // std::cout << recv_str << std::endl;
                         do_write(output_shell(std::to_string(s_id), recv_str));
-						do_read();
+						if(recv_str.find("left. ***") == std::string::npos){
+                           do_read();
+                        }
+						// do_read();
                     }
                     
                     // find prompt, send command
