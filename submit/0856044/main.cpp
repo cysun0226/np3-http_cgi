@@ -13,7 +13,8 @@
 #include <boost/algorithm/string/split.hpp>
 
 #include <sys/types.h>
-#include <windows.h>
+#include <chrono>
+#include <thread>
 
 #include <boost/algorithm/string/replace.hpp>
 #include <thread>
@@ -310,65 +311,45 @@ std::string panel_html = R"(
 </html>
 )";
 
-std::string parse(std::string req_str, std::string server_ip){
+std::string parse(std::string req_str, std::string remote_addr, std::string remote_port){
     boost::replace_all(req_str, "\\", "");
-    std::cout << req_str << std::endl;
-    stringstream ss;
+    // std::cout << req_str << std::endl;
+    std::stringstream ss;
     ss.str(req_str);
     std::string str;
     std::string req_method;
     std::string req_uri;
-    std::string remote_addr;
     std::string remote_host;
+    std::string query_str;
     std::string server_protocol;
     std::string http_host;
 
-    // REQUEST METHOD
-    ss >> req_method;
-    cout << "req_method" << endl;
-    cout << req_method << endl;
-
-    // uri & QUERY STRING
-    ss >> str;
-    if (str == "/favicon.ico"){
-      return str;
+    while (ss >> str) {
+        if (str == "GET"){
+            req_method = "GET";
+            // uri & QUERY STRING
+            ss >> str;
+            req_uri = str.substr(0, str.find("?"));
+            query_str = (str.find("?") != std::string::npos)? str.substr(str.find("?")+1) : "";
+            // SERVER PROTOCOL
+            ss >> server_protocol;
+        }
+        if (str == "Host:"){
+            ss >> http_host;
+        }
     }
-    std::cout << str << std::endl;
-    req_uri = str.substr(0, str.find("?"));
-    cout << "req_uri" << endl;
-    cout << req_uri << endl;
-    query_str = str.substr(str.find("?")+1);
-    cout << "query_str" << endl;
-    cout << query_str << endl;
-    // parse_query(query_str, requests);
-
-    // SERVER PROTOCOL
-    ss >> server_protocol;
-    cout << "server_protocol" << endl;
-    cout << server_protocol << endl;
-
-    // host
-    ss >> str; ss >> http_host;
-    http_host = http_host.substr(0, http_host.find(":"));
-    cout << "http_host" << endl;
-    cout << http_host << endl;
-
-    // server addr
-    ip::tcp::endpoint ep(ip::tcp::v4(), port);
-    cout << "server_addr" << endl;
-    cout << server_addr << endl;
-    cout << "server_port" << endl;
-    cout << port << endl;
-
-    // set env
-    std::string set_env_str;
-    // setenv("REQUEST_METHOD", req_method.c_str(), 1);
-    // setenv("REQUEST_URI", req_uri.c_str(), 1);
-    // setenv("QUERY_STRING", query_str.c_str(), 1);
-    // setenv("HTTP_HOST", http_host.c_str(), 1);
-    // // setenv(// set_env_str = "SERVER ADDR="+serve.c_str(), 1)r
-    // setenv("SERVER_PORT", std::to_string(port).c_str(), 1);
-    // setenv("SERVER_PROTOCOL", server_protocol.c_str(), 1);
+    
+    // std::vector<std::pair<std::string, std::string>> env_vars;
+    // env_vars.push_back(std::pair<std::string, std::string>("REQUEST_METHOD", req_method));
+    // env_vars.push_back(std::pair<std::string, std::string>("REQUEST_URI", req_uri));
+    // env_vars.push_back(std::pair<std::string, std::string>("QUERY_STRING" , query_str));
+    // env_vars.push_back(std::pair<std::string, std::string>("HTTP_HOST" , http_host));
+    // env_vars.push_back(std::pair<std::string, std::string>("SERVER_PORT" , std::to_string(port)));
+    // env_vars.push_back(std::pair<std::string, std::string>("SERVER_ADDR" , server_addr));
+    // env_vars.push_back(std::pair<std::string, std::string>("SERVER_PROTOCOL" , server_protocol));
+    // env_vars.push_back(std::pair<std::string, std::string>("REMOTE_ADDR" , remote_addr));
+    // env_vars.push_back(std::pair<std::string, std::string>("REMOTE_PORT" , remote_port));
+    // set_env_var(env_vars);
 
     return req_uri;
 }
@@ -512,25 +493,27 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                     
                     // find prompt, send command
                     if (recv_str.find("%") != std::string::npos){ // find prompt
-                        Sleep(100);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
                         
                         // std::cout << "find %, cmds.size() = " << cmds.size() << std::endl;
                         // std::cout << "s" << session_id << " : " << cmds[cmd_idx] << std::endl;
                         std::string r = cmds[cmd_idx] + "\r\n";
                         do_write(output_command(std::to_string(s_id), cmds[cmd_idx]));
 
-                        Sleep(100);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
                         do_send_cmd();
                     }
                     else{
                         // std::cout.write(bytes.data(), bytes_transferred);
                         // std::cout.flush();
                         // output_shell(session_id, recv_str);
-                        do_read();
+                        if(recv_str.find("left. ***") == std::string::npos){
+                          do_read();
+                        }
                     }
                 }
                 else{
-                    // output_command(std::to_string(s_id), "(connection close)");
+                    do_write(output_command(std::to_string(s_id), "(connection close)"));
                 }
             });
         }
@@ -597,20 +580,14 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
             std::string req_str(std::begin(_data), std::end(_data));
             std::cout << "=== new request ===\n" << std::endl;
 
-            std::string uri_file = parse(req_str, "");
-            std::cout << "remote addr" << std::endl;
-            std::cout << _socket.remote_endpoint().address() << std::endl;
-            std::cout << _socket.remote_endpoint().port() << std::endl;
+            std::string uri_file = parse(
+              req_str, 
+              _socket.remote_endpoint().address().to_string(), 
+              std::to_string(_socket.remote_endpoint().port())
+            );
+            
             std::string target_cgi = "."+uri_file;
             std::cout << "execute" << target_cgi << std::endl;
-
-            std::string set_env_str;
-            set_env_str = "REMOTE_ADDR"+_socket.remote_endpoint().address().to_string();
-            // setenv("REMOTE_ADDR", _socket.remote_endpoint().address().to_string().c_str(), 1);
-            set_env_str = "REMOTE_PORT"+_socket.remote_endpoint().port();
-            // setenv("REMOTE_PORT", std::to_string(_socket.remote_endpoint().port()).c_str(), 1);
-
-            
 
             // reply to the client
             bool ok = true;
@@ -626,23 +603,21 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
             }
 
             if(uri_file == "/panel.cgi"){
-                write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
-				do_write("Content-type: text/html\r\n\r\n");
-				// write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>Hello</h1>\r\n"));
+                do_write("HTTP/1.1 200 OK\r\n");
+                // write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
+				        do_write("Content-type: text/html\r\n\r\n");
+				        // write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>Hello</h1>\r\n"));
                 do_write(panel_html);
                 
             }
 
             if(uri_file == "/console.cgi"){
-                write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
-				do_write("Content-type: text/html\r\n\r\n");
+                // write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
+                do_write("HTTP/1.1 200 OK\r\n");
+				        do_write("Content-type: text/html\r\n\r\n");
                 NpSession ns = parse_query(query_str);
-                std::cout << "generate_webpage" << std::endl;
                 do_write(generate_webpage(ns));
-                std::cout << "generate_webpage finish" << std::endl;
-
-                // ShellSession s1("127.0.0.1", "1240", "t1.txt", "0");
-                // s1.start();
+                
                 std::vector<ShellSession> shell_sessions;
                 for (size_t i = 0; i < ns.host_num; i++){
                   shell_sessions.push_back(ShellSession(
@@ -664,8 +639,6 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
                 // threads.join_all();
                 // shell_thread.join();
                 // shell_thread.detach();
-                
-                
             }
           }
           
