@@ -71,6 +71,7 @@ std::string parse(std::string req_str, std::string remote_addr, std::string remo
         }
         if (str == "Host:"){
             ss >> http_host;
+            http_host = http_host.substr(0, http_host.find(":"));
         }
     }
     
