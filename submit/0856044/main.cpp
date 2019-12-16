@@ -139,7 +139,6 @@ std::string generate_webpage(NpSession ns){
   }
 
   for (size_t i = 0; i < ns.host_num; i++){
-    std::cout << ns.host_num << std::endl;
     page += host_cols[i];
   }
   page += footer_1;
@@ -320,7 +319,6 @@ std::string parse(std::string req_str, std::string remote_addr, std::string remo
     std::string req_method;
     std::string req_uri;
     std::string remote_host;
-    std::string query_str;
     std::string server_protocol;
     std::string http_host;
 
@@ -489,6 +487,7 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                         // std::cout << "# get data" << std::endl;
                         // std::cout << recv_str << std::endl;
                         do_write(output_shell(std::to_string(s_id), recv_str));
+						do_read();
                     }
                     
                     // find prompt, send command
@@ -507,9 +506,9 @@ class ShellSession : public std::enable_shared_from_this<ShellSession> {
                         // std::cout.write(bytes.data(), bytes_transferred);
                         // std::cout.flush();
                         // output_shell(session_id, recv_str);
-                        if(recv_str.find("left. ***") == std::string::npos){
-                          do_read();
-                        }
+                        // if(recv_str.find("left. ***") == std::string::npos){
+                          // do_read();
+                        // }
                     }
                 }
                 else{
@@ -620,6 +619,7 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
                 
                 std::vector<ShellSession> shell_sessions;
                 for (size_t i = 0; i < ns.host_num; i++){
+					// std::cout << "s" << i << ", " << ns.host_name[i] << ":" << ns.host_port[i] << ns.file_name[i] << std::endl;
                   shell_sessions.push_back(ShellSession(
                     ns.host_name[i], ns.host_port[i], 
                     ns.file_name[i], std::to_string(i),
