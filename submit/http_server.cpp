@@ -38,66 +38,53 @@ void exec_cgi(int client_fd, std::string target_cgi){
     // exit(0);
 }
 
-std::string parse(std::string req_str, std::string server_ip){
+void set_env_var(std::vector<std::pair<std::string, std::string>> env_vars){
+    for (size_t i = 0; i < env_vars.size(); i++){
+        std::cout << env_vars[i].first.c_str() << " = " 
+                  << env_vars[i].second.c_str() << std::endl;
+        setenv(env_vars[i].first.c_str(), env_vars[i].second.c_str(), 1);
+    }
+}
+
+std::string parse(std::string req_str, std::string remote_addr, std::string remote_port){
     boost::replace_all(req_str, "\\", "");
-    std::cout << req_str << std::endl;
-    stringstream ss;
+    // std::cout << req_str << std::endl;
+    std::stringstream ss;
     ss.str(req_str);
     std::string str;
     std::string req_method;
     std::string req_uri;
-    std::string remote_addr;
     std::string remote_host;
     std::string query_str;
     std::string server_protocol;
     std::string http_host;
 
-    // REQUEST METHOD
-    ss >> req_method;
-    cout << "req_method" << endl;
-    cout << req_method << endl;
-
-    // uri & QUERY STRING
-    ss >> str;
-    if (str == "/favicon.ico"){
-      return str;
+    while (ss >> str) {
+        if (str == "GET"){
+            req_method = "GET";
+            // uri & QUERY STRING
+            ss >> str;
+            req_uri = str.substr(0, str.find("?"));
+            query_str = (str.find("?") != std::string::npos)? str.substr(str.find("?")+1) : "";
+            // SERVER PROTOCOL
+            ss >> server_protocol;
+        }
+        if (str == "Host:"){
+            ss >> http_host;
+        }
     }
-    std::cout << str << std::endl;
-    req_uri = str.substr(0, str.find("?"));
-    cout << "req_uri" << endl;
-    cout << req_uri << endl;
-    query_str = str.substr(str.find("?")+1);
-    cout << "query_str" << endl;
-    cout << query_str << endl;
-    // parse_query(query_str, requests);
-
-    // SERVER PROTOCOL
-    ss >> server_protocol;
-    cout << "server_protocol" << endl;
-    cout << server_protocol << endl;
-
-    // host
-    ss >> str; ss >> http_host;
-    http_host = http_host.substr(0, http_host.find(":"));
-    cout << "http_host" << endl;
-    cout << http_host << endl;
-
-    // server addr
-    ip::tcp::endpoint ep(ip::tcp::v4(), port);
-    cout << "server_addr" << endl;
-    cout << server_addr << endl;
-    cout << "server_port" << endl;
-    cout << port << endl;
-
-    // set env
-    std::string set_env_str;
-    setenv("REQUEST_METHOD", req_method.c_str(), 1);
-    setenv("REQUEST_URI", req_uri.c_str(), 1);
-    setenv("QUERY_STRING", query_str.c_str(), 1);
-    setenv("HTTP_HOST", http_host.c_str(), 1);
-    // setenv(// set_env_str = "SERVER ADDR="+serve.c_str(), 1)r
-    setenv("SERVER_PORT", std::to_string(port).c_str(), 1);
-    setenv("SERVER_PROTOCOL", server_protocol.c_str(), 1);
+    
+    std::vector<std::pair<std::string, std::string>> env_vars;
+    env_vars.push_back(std::pair<std::string, std::string>("REQUEST_METHOD", req_method));
+    env_vars.push_back(std::pair<std::string, std::string>("REQUEST_URI", req_uri));
+    env_vars.push_back(std::pair<std::string, std::string>("QUERY_STRING" , query_str));
+    env_vars.push_back(std::pair<std::string, std::string>("HTTP_HOST" , http_host));
+    env_vars.push_back(std::pair<std::string, std::string>("SERVER_PORT" , std::to_string(port)));
+    env_vars.push_back(std::pair<std::string, std::string>("SERVER_ADDR" , server_addr));
+    env_vars.push_back(std::pair<std::string, std::string>("SERVER_PROTOCOL" , server_protocol));
+    env_vars.push_back(std::pair<std::string, std::string>("REMOTE_ADDR" , remote_addr));
+    env_vars.push_back(std::pair<std::string, std::string>("REMOTE_PORT" , remote_port));
+    set_env_var(env_vars);
 
     return req_uri;
 }
@@ -111,7 +98,10 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
  public:
   EchoSession(ip::tcp::socket socket) : _socket(move(socket)) {}
 
-  void start() { do_read(); }
+  void start() { 
+    do_read(); 
+    server_addr = _socket.local_endpoint().address().to_string();
+  }
 
  private:
   void do_read() {
@@ -121,34 +111,38 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
         [this, self](boost::system::error_code ec, size_t length) {
           if (!ec){
             std::string req_str(std::begin(_data), std::end(_data));
-            std::cout << "=== new request ===\n" << std::endl;
+            std::cout << "\n\n=== new request ===\n" << std::endl;
 
-            std::string uri_file = parse(req_str, "");
-            std::cout << "remote addr" << std::endl;
-            std::cout << _socket.remote_endpoint().address() << std::endl;
-            std::cout << _socket.remote_endpoint().port() << std::endl;
+            std::string uri_file = parse(
+              req_str, 
+              _socket.remote_endpoint().address().to_string(), 
+              std::to_string(_socket.remote_endpoint().port())
+            );
             std::string target_cgi = "."+uri_file;
             std::cout << "execute" << target_cgi << std::endl;
-
-            std::string set_env_str;
-            set_env_str = "REMOTE_ADDR"+_socket.remote_endpoint().address().to_string();
-            setenv("REMOTE_ADDR", _socket.remote_endpoint().address().to_string().c_str(), 1);
-            set_env_str = "REMOTE_PORT"+_socket.remote_endpoint().port();
-            setenv("REMOTE_PORT", std::to_string(_socket.remote_endpoint().port()).c_str(), 1);
-
-            
 
             // reply to the client
             bool ok = true;
             // check if file exist
-            if (!boost::filesystem::exists("."+uri_file) || uri_file == "/favicon.ico"){
-                write(_socket, buffer("HTTP/1.1 404 Not Fount\r\n"));
-                write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n"));
+            if (!boost::filesystem::exists("."+uri_file)){
+                do_write("HTTP/1.1 404 Not Fount\r\n");
+                // write(_socket, buffer("HTTP/1.1 404 Not Fount\r\n"));
+                do_write("Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n");
+                // write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n"));
                 ok = false;
             }
 
+            if(uri_file == "/favicon.ico" || uri_file == "" || uri_file == "/"){
+              std::cout << "null uri file" << std::endl;
+              do_write("HTTP/1.1 200 OK\r\n");
+              // write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
+              do_write("Content-type: text/html\r\n\r\n");
+              ok = false;
+            }
+
             if(ok){
-                write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
+              do_write("HTTP/1.1 200 OK\r\n");
+                // write(_socket, buffer());
 
             // fork to execute console.cgi
             global_io_service.notify_fork(boost::asio::io_context::fork_prepare);
@@ -176,14 +170,14 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
 
             
           }
-          do_read();
+          // do_read();
         });
   }
 
-  void do_write(size_t length) {
+  void do_write(std::string msg) {
     auto self(shared_from_this());
     _socket.async_send(
-        buffer(_data, length),
+        buffer(msg),
         [this, self](boost::system::error_code ec, size_t /* length */) {
           // if (!ec) do_read();
         });
@@ -206,7 +200,6 @@ class EchoServer {
   void do_accept() {
     _acceptor.async_accept(_socket, [this](boost::system::error_code ec) {
       if (!ec) make_shared<EchoSession>(move(_socket))->start();
-
       do_accept();
     });
   }
