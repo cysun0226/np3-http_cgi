@@ -127,8 +127,8 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
             if (!boost::filesystem::exists("."+uri_file)){
                 do_write("HTTP/1.1 404 Not Fount\r\n");
                 // write(_socket, buffer("HTTP/1.1 404 Not Fount\r\n"));
-                do_write("Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n");
                 // write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n"));
+                do_write("Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n");
                 ok = false;
             }
 
