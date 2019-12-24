@@ -23,6 +23,7 @@
 
 
 #define MAX_REQUEST_NUM 5
+#define FIREWALL_IP "140.113.209"
 
 using namespace std;
 using namespace boost::asio;
@@ -124,8 +125,16 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
 
             // reply to the client
             bool ok = true;
+            
+            // firewall
+            if (_socket.remote_endpoint().address().to_string().find(FIREWALL_IP) == std::string::npos){
+              write(_socket, buffer("HTTP/1.1 403 Forbidden\r\n"));
+              write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>403 Forbidden</h1>\r\n"));
+              ok = false;
+            }
+
             // check if file exist
-            if (!boost::filesystem::exists("."+uri_file)){
+            if (ok != false && !boost::filesystem::exists("."+uri_file)){
                 do_write("HTTP/1.1 404 Not Fount\r\n");
                 // write(_socket, buffer("HTTP/1.1 404 Not Fount\r\n"));
                 // write(_socket, buffer("Content-type: text/html\r\n\r\n<h1>404 Not Found</h1>\r\n"));
@@ -133,7 +142,7 @@ class EchoSession : public enable_shared_from_this<EchoSession> {
                 ok = false;
             }
 
-            if(uri_file == "/favicon.ico" || uri_file == "" || uri_file == "/"){
+            if(ok != false || uri_file == "/favicon.ico" || uri_file == "" || uri_file == "/"){
               std::cout << "null uri file" << std::endl;
               do_write("HTTP/1.1 200 OK\r\n");
               // write(_socket, buffer("HTTP/1.1 200 OK\r\n"));
